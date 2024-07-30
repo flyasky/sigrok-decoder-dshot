@@ -142,18 +142,22 @@ class DshotTelem(DshotCommon):
         bitmask = 0b11111 << ((nibbles - 1) * 5)
 
         for n in range(nibbles):
-            gcr_n = bitmask & bits
-            ungcr = self.bits_gcr(bin(gcr_n >> (nibbles - (n + 1)) * 5))
+            try:
+                gcr_n = bitmask & bits
+                key = gcr_n >> (nibbles - (n + 1)) * 5
+                ungcr = self.bits_gcr(key)
 
-            output = (output << 4) | ungcr
-            print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
-            bitmask = (bitmask >> 5)
+                output = (output << 4) | ungcr
+                print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
+                bitmask = (bitmask >> 5)
+            except:
+                raise ValueError
 
         # Compare CRC
-        crc_received = output & 0xF
-        output = (output >> 4) & 0xFFF
-        crc_calc = ~((output ^ (output >> 4) ^ (output >> 8))) & 0x0F
-
+        self.crc_recv = output & 0xF
+        data = (output >> 4) & 0xFFF
+        #crc_calc = ~((output ^ (output >> 4) ^ (output >> 8))) & 0x0F
+        return self.checkCRC(data)
         # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
         #          end, self.out_ann,
         #          [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])

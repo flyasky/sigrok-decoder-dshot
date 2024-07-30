@@ -23,6 +23,14 @@ class MyTestCase(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.telem_value.bits_gcr(0b110)
 
+    def test_process_bad(self):
+        self.telem_value.bits = 0b11101001001100010010
+        self.assertTrue(self.telem_value.process_telem())
+    def test_process_good(self):
+        self.telem_value.bits = 0b1110100100110001001
+        self.assertTrue(self.telem_value.process_telem())
+
+
 
 
 
