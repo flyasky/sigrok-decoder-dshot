@@ -150,9 +150,7 @@ class DshotTelem(DshotCommon):
                 gcr_n = bitmask & bits
                 key = gcr_n >> (nibbles - (n + 1)) * 5
                 ungcr = self.bits_gcr(key)
-
                 output = (output << 4) | ungcr
-                print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
                 bitmask = (bitmask >> 5)
             except:
                 raise BitException(bin(key),bin(gcr_n))
@@ -160,7 +158,7 @@ class DshotTelem(DshotCommon):
         # Compare CRC
         crc_recv = output & 0xF
         data = (output >> 4) & 0xFFF
-        #crc_calc = ~((output ^ (output >> 4) ^ (output >> 8))) & 0x0F
+
         return(self.checkCRC(data,crc_recv))
         # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
         #          end, self.out_ann,
