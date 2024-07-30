@@ -100,6 +100,10 @@ class DshotCmd(DshotCommon):
             # TODO: Align this correctly
 
 
+class BitException(ValueError):
+    def __init__(self, arg1, arg2):
+        super().__init__(arg1)
+        print("Second argument is " + arg2)
 
 
 class DshotTelem(DshotCommon):
@@ -150,7 +154,7 @@ class DshotTelem(DshotCommon):
                 print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
                 bitmask = (bitmask >> 5)
             except:
-                raise ValueError
+                raise BitException(bin(key),bin(gcr_n))
 
         # Compare CRC
         self.crc_recv = output & 0xF
