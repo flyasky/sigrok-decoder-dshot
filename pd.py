@@ -140,12 +140,9 @@ class Decoder(srd.Decoder):
                      [4, ['CRC INVALID']])
 
 
-    def complete_DshotBit(self, *args):
-        bitseq = BitDshot(*args)
-
+    def display_bit(self,bitseq,annot):
         self.put(bitseq.ss, bitseq.es, self.out_ann,
-                 [0, ['%d' % bool(bitseq)]])
-        return [bitseq]
+                 [annot, ['%d' % bool(bitseq)]])
 
     def decode(self):
         if not self.samplerate:
@@ -174,13 +171,15 @@ class Decoder(srd.Decoder):
                         # TODO: Confirm wait period this works with spec
 
                         args = self.currbit_ss, self.currbit_es, (self.currbit_ss + self.dshot_cfg.samples_pp)
-                        results += self.complete_DshotBit(*args)
+                        curr_bit = BitDshot(*args)
+                        dshot_value.add_bit(curr_bit)
+                        self.display_bit(curr_bit,0)
                         self.currbit_ss = None
                         self.currbit_es = None
                         #print(results)
                         # Pass results to decoder
 
-                        result = dshot_value.handle_bits_dshot(results)
+                        result = dshot_value.handle_bits_dshot()
                         if result:
                             self.display_dshot(dshot_value)
                         if result and self.dshot_cfg.bidirectional:
@@ -198,7 +197,9 @@ class Decoder(srd.Decoder):
                     elif self.matched[0] and self.currbit_es and self.currbit_ss:
                         # Have complete bit, can handle bit now
                         args = self.currbit_ss, self.currbit_es, self.samplenum
-                        results += self.complete_DshotBit(*args)
+                        curr_bit = BitDshot(*args)
+                        dshot_value.add_bit(curr_bit)
+                        self.display_bit(curr_bit,0)
 
                         self.currbit_ss = self.samplenum
                         self.currbit_es = None
@@ -225,10 +226,7 @@ class Decoder(srd.Decoder):
                             # Append next bit
                             args = (self.samplenum - self.dshot_cfg.telem_baudrate_midpoint), self.samplenum, (self.samplenum + self.dshot_cfg.telem_baudrate_midpoint)
                             curr_bit = Bit_DshotTelem(*args,self.matched)
-                            self.put(curr_bit.ss,curr_bit.es,
-                                     self.out_ann,
-                                     [5, ['%04d' % curr_bit.bit_]])
-
+                            self.display_bit(curr_bit,5)
                             telem_value.add_bit(curr_bit)
 
 

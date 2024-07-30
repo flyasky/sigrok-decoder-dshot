@@ -16,6 +16,10 @@ class BitDshot(Sequence):
         self.ss, self.ts, self.es = ss, ts, es
         self.process_bit()
         return
+    def getBit(self):
+        if self.bit_ is None:
+            raise ValueError
+        return self.bit_
     def process_bit(self):
 
         self.period = self.es - self.ss
@@ -23,11 +27,10 @@ class BitDshot(Sequence):
         # Ideal duty for T0H: 33%, T1H: 66%.
         self.bit_ = (self.duty / self.period) > 0.5
         # TODO: Add tolerance
+        return self.getBit()
 
     def __bool__(self):
-        if self.bit_ is None:
-            raise ValueError
-        return self.bit_
+        return bool(self.getBit())
 class Bit_DshotTelem(Sequence):
     def __init__(self, ss, ts, es, matched):
         super().__init__()
@@ -39,6 +42,10 @@ class Bit_DshotTelem(Sequence):
         self.ss, self.ts, self.es = ss, ts, es
         self.process_bit(matched)
 
+    def getBit(self):
+        if self.bit_ is None:
+            raise ValueError
+        return self.bit_
     def process_bit(self,matched):
         # Low/High @ given sample
         if matched == (True, False):
@@ -49,6 +56,9 @@ class Bit_DshotTelem(Sequence):
         if matched == (False, True):
             # 1 value
             self.bit_ = 1
-        if self.bit_ is None:
-            raise ValueError
-        return self.bit_
+        return self.getBit()
+
+    def __bool__(self):
+        return bool(self.getBit())
+
+

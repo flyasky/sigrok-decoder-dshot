@@ -51,6 +51,8 @@ class DshotCommon():
         self.crc_recv = None
         self.crc_calc = None
         self.crc_ok = False
+        self.bits = 0
+        self.results = []
 
     def checkCRC(self,data,crc_recv):
         self.crc_recv = crc_recv
@@ -66,17 +68,21 @@ class DshotCommon():
         self.crc_ok = True
         return True
 
+    def add_bit(self, seq):
+        self.results += [seq]
+        self.bits = self.bits << 1
+        self.bits = self.bits | seq.bit_
+
 class DshotCmd(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
-        self.results = None
+
         self.dshot_value = None
         self.telem_request = None
         return
-    def handle_bits_dshot(self,results):
+    def handle_bits_dshot(self):
         # ss, es, bit
-        self.results = results
-        if len(results) != 16:
+        if len(self.results) != 16:
             return False
         # Get bits only
         bits = [bool(result) for result in self.results]
@@ -110,17 +116,13 @@ class BitException(ValueError):
 class DshotTelem(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
-        self.results = []
-        self.bits = 0
+
         self.dshot_value = None
         self.telem_request = None
         self.xor = 0b0
         return
 
-    def add_bit(self, seq):
-        self.results += [seq]
-        self.bits = self.bits << 1
-        self.bits = self.bits | seq.bit_
+
 
     def bits_xor_next(self,bits):
         return bits ^ (bits >> 1)
