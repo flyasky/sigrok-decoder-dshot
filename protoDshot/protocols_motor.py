@@ -114,9 +114,8 @@ class DshotTelem(DshotCommon):
 
     def add_bit(self, seq):
         self.results += [seq]
-        self.bits = self.bits | seq.bit_
         self.bits = self.bits << 1
-        print(bin(self.bits))
+        self.bits = self.bits | seq.bit_
 
     def bits_xor_next(self,bits):
         return bits ^ (bits >> 1)

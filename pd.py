@@ -205,7 +205,7 @@ class Decoder(srd.Decoder):
                 case State.TELEM:
                     match self.state_telem:
                         case State_Telem.RESET:
-                            telem = 0b0
+                            telem_value = DshotTelem(self.dshot_cfg)
                             self.state_telem = State_Telem.START
 
                         case State_Telem.START:
@@ -235,7 +235,7 @@ class Decoder(srd.Decoder):
                             # Skip half bitwidth to end of bit
                             pins = self.wait([{'skip': self.dshot_cfg.telem_baudrate_midpoint}])
 
-                            if telem_value.bits.bit_length() >= 20:
+                            if telem_value.bits.bit_length() >= 20-1:
                                 telem_value.process_telem()
 
                                 # Reset
