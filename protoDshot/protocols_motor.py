@@ -109,6 +109,7 @@ class DshotTelem(DshotCommon):
         self.bits = 0
         self.dshot_value = None
         self.telem_request = None
+        self.xor = 0b0
         return
 
     def add_bit(self, seq):
@@ -123,7 +124,7 @@ class DshotTelem(DshotCommon):
         #self.put(start, end, self.out_ann, [6, ['%23s' % bin(packet)]])
         # XOR with next?
         self.bits &= 0x0FFFFF
-        self.bits = (self.bits ^ (self.bits >> 1))
+        self.xor = (self.bits ^ (self.bits >> 1))
         #self.put(start,end, self.out_ann, [7, ['%23s' % bin(packet)]])
         # Undo GCR
         output = 0b0
@@ -132,7 +133,7 @@ class DshotTelem(DshotCommon):
         bitmask = 0b11111 << ((nibbles - 1) * 5)
 
         for n in range(nibbles):
-            gcr_n = bitmask & self.bits
+            gcr_n = bitmask & self.xor
             ungcr = gcr_tables[bin(gcr_n >> (nibbles - (n + 1)) * 5)]
             output = (output << 4) | ungcr
             print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
@@ -143,13 +144,13 @@ class DshotTelem(DshotCommon):
         output = (output >> 4) & 0xFFF
         crc_calc = ~((output ^ (output >> 4) ^ (output >> 8))) & 0x0F
 
-        self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
-                 end, self.out_ann,
-                 [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])
-        if crc_calc != crc_received:
-            self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
-                     end, self.out_ann,
-                     [8, ['%23s' % ("CRC ERROR!")]])
+        # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
+        #          end, self.out_ann,
+        #          [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])
+        # if crc_calc != crc_received:
+            # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
+            #          end, self.out_ann,
+            #          [8, ['%23s' % ("CRC ERROR!")]])
         # The upper 12 bit contain the eperiod (1/erps) in the following bitwise encoding:
         #
         # e e e m m m m m m m m m
