@@ -52,7 +52,8 @@ class DshotCommon():
         self.crc_calc = None
         self.crc_ok = False
 
-    def checkCRC(self,data):
+    def checkCRC(self,data,crc_recv):
+        self.crc_recv = crc_recv
         if self.cfg.bidirectional:
             # TODO: Move CRC out?
             self.crc_calc = int((~(data ^ (data >> 4) ^ (data >> 8))) & 0x0F)
@@ -82,7 +83,7 @@ class DshotCmd(DshotCommon):
         # Convert to binary from list
         bits = reduce(lambda a, b: (a << 1) | b, bits)
         # Seperate CRC
-        self.crc_recv = bits & 0xF
+        crc_recv = bits & 0xF
         bits = bits >> 4
         # Remainder is data
         data = bits
@@ -92,7 +93,7 @@ class DshotCmd(DshotCommon):
         bits = bits >> 1
         self.dshot_value = bits
 
-        if not self.checkCRC(data):
+        if not self.checkCRC(data,crc_recv):
             return False
 
 
@@ -157,10 +158,10 @@ class DshotTelem(DshotCommon):
                 raise BitException(bin(key),bin(gcr_n))
 
         # Compare CRC
-        self.crc_recv = output & 0xF
+        crc_recv = output & 0xF
         data = (output >> 4) & 0xFFF
         #crc_calc = ~((output ^ (output >> 4) ^ (output >> 8))) & 0x0F
-        return self.checkCRC(data)
+        return(self.checkCRC(data,crc_recv))
         # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
         #          end, self.out_ann,
         #          [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])

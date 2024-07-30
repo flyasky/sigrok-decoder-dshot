@@ -23,12 +23,13 @@ class MyTestCase(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.telem_value.bits_gcr(0b110)
 
-    def test_process_bad(self):
+    def test_eprm_long(self):
         self.telem_value.bits = 0b11101001001100010010
-        self.assertTrue(self.telem_value.process_telem())
-    def test_process_good(self):
+        with self.assertRaises(BitException):
+            self.telem_value.process_telem_erpm()
+    def test_erpm_good(self):
         self.telem_value.bits = 0b1110100100110001001
-        self.assertTrue(self.telem_value.process_telem())
+        self.assertTrue(self.telem_value.process_telem_erpm())
 
 
 
@@ -39,8 +40,6 @@ class MyTestCase(unittest.TestCase):
         # telem_value.process_telem()
         # self.assertNotEqual(telem_value.xor, 0b1001110110101001101)
 
-    def test_something(self):
-        self.assertEqual(True, False)  # add assertion here
 
 
 if __name__ == '__main__':
