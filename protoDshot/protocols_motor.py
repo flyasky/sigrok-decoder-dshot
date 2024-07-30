@@ -118,13 +118,22 @@ class DshotTelem(DshotCommon):
         self.bits = self.bits << 1
         print(bin(self.bits))
 
+    def bits_xor_next(self,bits):
+        return bits ^ (bits >> 1)
+
+    def bits_gcr(self,bits):
+        try:
+            return gcr_tables[bin(bits)]
+        except:
+            raise
 
     def process_telem_erpm(self):
         # Raw packet
         #self.put(start, end, self.out_ann, [6, ['%23s' % bin(packet)]])
         # XOR with next?
-        self.bits &= 0x0FFFFF
-        self.xor = (self.bits ^ (self.bits >> 1))
+        bits = self.bits
+        bits &= 0x0FFFFF
+        bits = self.bits_xor_next(bits)
         #self.put(start,end, self.out_ann, [7, ['%23s' % bin(packet)]])
         # Undo GCR
         output = 0b0
@@ -133,8 +142,9 @@ class DshotTelem(DshotCommon):
         bitmask = 0b11111 << ((nibbles - 1) * 5)
 
         for n in range(nibbles):
-            gcr_n = bitmask & self.xor
-            ungcr = gcr_tables[bin(gcr_n >> (nibbles - (n + 1)) * 5)]
+            gcr_n = bitmask & bits
+            ungcr = self.bits_gcr(bin(gcr_n >> (nibbles - (n + 1)) * 5))
+
             output = (output << 4) | ungcr
             print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
             bitmask = (bitmask >> 5)
