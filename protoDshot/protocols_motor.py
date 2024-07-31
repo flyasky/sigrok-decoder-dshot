@@ -161,7 +161,9 @@ class DshotTelem(DshotCommon):
         crc_recv = output & 0xF
         data = (output >> 4) & 0xFFF
 
-        return(self.checkCRC(data,crc_recv))
+        if not self.checkCRC(data,crc_recv):
+            raise ValueError
+        return True
         # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
         #          end, self.out_ann,
         #          [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])
