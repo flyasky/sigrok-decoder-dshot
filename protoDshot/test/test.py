@@ -31,6 +31,11 @@ class MyTestCase(unittest.TestCase):
         self.telem_value.bits = 0b1110100100110001001
         self.assertTrue(self.telem_value.process_telem_erpm())
 
+    def test_eprm_zero_packet(self):
+        # Should return a warning in UI, raise ValueError?
+        self.telem_value.bits = 0b1010010100101010001
+        self.assertTrue(self.telem_value.process_telem_erpm())
+
 
 
 
