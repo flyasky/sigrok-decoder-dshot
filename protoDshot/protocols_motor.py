@@ -51,8 +51,11 @@ class DshotCommon():
         self.crc_recv = None
         self.crc_calc = None
         self.crc_ok = False
+        self.bits = 0
+        self.results = []
 
-    def checkCRC(self,data):
+    def checkCRC(self,data,crc_recv):
+        self.crc_recv = crc_recv
         if self.cfg.bidirectional:
             # TODO: Move CRC out?
             self.crc_calc = int((~(data ^ (data >> 4) ^ (data >> 8))) & 0x0F)
@@ -65,24 +68,28 @@ class DshotCommon():
         self.crc_ok = True
         return True
 
+    def add_bit(self, seq):
+        self.results += [seq]
+        self.bits = self.bits << 1
+        self.bits = self.bits | seq.bit_
+
 class DshotCmd(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
-        self.results = None
+
         self.dshot_value = None
         self.telem_request = None
         return
-    def handle_bits_dshot(self,results):
+    def handle_bits_dshot(self):
         # ss, es, bit
-        self.results = results
-        if len(results) != 16:
+        if len(self.results) != 16:
             return False
         # Get bits only
         bits = [bool(result) for result in self.results]
         # Convert to binary from list
         bits = reduce(lambda a, b: (a << 1) | b, bits)
         # Seperate CRC
-        self.crc_recv = bits & 0xF
+        crc_recv = bits & 0xF
         bits = bits >> 4
         # Remainder is data
         data = bits
@@ -92,7 +99,7 @@ class DshotCmd(DshotCommon):
         bits = bits >> 1
         self.dshot_value = bits
 
-        if not self.checkCRC(data):
+        if not self.checkCRC(data,crc_recv):
             return False
 
 
@@ -100,30 +107,39 @@ class DshotCmd(DshotCommon):
             # TODO: Align this correctly
 
 
+class BitException(ValueError):
+    def __init__(self, arg1, arg2):
+        super().__init__(arg1)
+        print("Second argument is " + arg2)
 
 
 class DshotTelem(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
-        self.results = []
-        self.bits = 0
+
         self.dshot_value = None
         self.telem_request = None
+        self.xor = 0b0
         return
 
-    def add_bit(self, seq):
-        self.results += [seq]
-        self.bits = self.bits | seq.bit_
-        self.bits = self.bits << 1
-        print(bin(self.bits))
 
+
+    def bits_xor_next(self,bits):
+        return bits ^ (bits >> 1)
+
+    def bits_gcr(self,bits):
+        try:
+            return gcr_tables[bin(bits)]
+        except:
+            raise
 
     def process_telem_erpm(self):
         # Raw packet
         #self.put(start, end, self.out_ann, [6, ['%23s' % bin(packet)]])
         # XOR with next?
-        self.bits &= 0x0FFFFF
-        self.bits = (self.bits ^ (self.bits >> 1))
+        bits = self.bits
+        bits &= 0x0FFFFF
+        bits = self.bits_xor_next(bits)
         #self.put(start,end, self.out_ann, [7, ['%23s' % bin(packet)]])
         # Undo GCR
         output = 0b0
@@ -132,24 +148,29 @@ class DshotTelem(DshotCommon):
         bitmask = 0b11111 << ((nibbles - 1) * 5)
 
         for n in range(nibbles):
-            gcr_n = bitmask & self.bits
-            ungcr = gcr_tables[bin(gcr_n >> (nibbles - (n + 1)) * 5)]
-            output = (output << 4) | ungcr
-            print(bin(gcr_n)+bin(ungcr)+bin(output)+bin(bitmask))
-            bitmask = (bitmask >> 5)
+            try:
+                gcr_n = bitmask & bits
+                key = gcr_n >> (nibbles - (n + 1)) * 5
+                ungcr = self.bits_gcr(key)
+                output = (output << 4) | ungcr
+                bitmask = (bitmask >> 5)
+            except:
+                raise BitException(bin(key),bin(gcr_n))
 
         # Compare CRC
-        crc_received = output & 0xF
-        output = (output >> 4) & 0xFFF
-        crc_calc = ~((output ^ (output >> 4) ^ (output >> 8))) & 0x0F
+        crc_recv = output & 0xF
+        data = (output >> 4) & 0xFFF
 
-        self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
-                 end, self.out_ann,
-                 [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])
-        if crc_calc != crc_received:
-            self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
-                     end, self.out_ann,
-                     [8, ['%23s' % ("CRC ERROR!")]])
+        if not self.checkCRC(data,crc_recv):
+            raise ValueError
+        return True
+        # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
+        #          end, self.out_ann,
+        #          [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])
+        # if crc_calc != crc_received:
+            # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
+            #          end, self.out_ann,
+            #          [8, ['%23s' % ("CRC ERROR!")]])
         # The upper 12 bit contain the eperiod (1/erps) in the following bitwise encoding:
         #
         # e e e m m m m m m m m m

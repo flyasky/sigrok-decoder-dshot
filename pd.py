@@ -36,7 +36,7 @@ class State(Enum):
     TELEM = 2
 
 
-class State_Telem(Enum):
+class State_Dshot(Enum):
     RESET = 0
     START = 1
     RECV = 2
@@ -94,7 +94,8 @@ class Decoder(srd.Decoder):
 
     def reset(self):
         self.state = State.CMD
-        self.state_telem = State_Telem.START
+        self.state_telem = State_Dshot.START
+        self.state_dshot = State_Dshot.START
 
         self.samplerate = None
         self.inreset = False
@@ -118,7 +119,9 @@ class Decoder(srd.Decoder):
         if key == srd.SRD_CONF_SAMPLERATE:
             self.samplerate = value
 
-
+    def display_bit(self, bitseq, annot):
+        self.put(bitseq.ss, bitseq.es, self.out_ann,
+                 [annot, ['%d' % bool(bitseq)]])
 
     def display_dshot(self,dshot):
         crc_startsample = dshot.results[12].ss
@@ -139,13 +142,16 @@ class Decoder(srd.Decoder):
             self.put(crc_startsample, dshot.results[15].es, self.out_ann,
                      [4, ['CRC INVALID']])
 
+    def display_telem(self, telem):
+        crc_startsample = telem.results[12].ss
+        self.put(crc_startsample, telem.results[15].es, self.out_ann,
+                 [3, ['Calc CRC: ' + ('%04d' % telem.crc_calc) + ' TXed CRC:' + ('%04d' % telem.crc_recv)]])
+        if not telem.crc_ok:
+            self.put(crc_startsample, telem.results[15].es, self.out_ann,
+                     [4, ['CRC INVALID']])
 
-    def complete_DshotBit(self, *args):
-        bitseq = BitDshot(*args)
 
-        self.put(bitseq.ss, bitseq.es, self.out_ann,
-                 [0, ['%d' % bool(bitseq)]])
-        return [bitseq]
+
 
     def decode(self):
         if not self.samplerate:
@@ -153,70 +159,76 @@ class Decoder(srd.Decoder):
 
         dshot_value = DshotCmd(self.dshot_cfg)
         telem_value = DshotTelem(self.dshot_cfg)
-        results = []
-        telem = 0b0
-        tlm_start = 0
 
         #bitseq = BitDshot()
         while True:
 
             match self.state:
                 case State.CMD:
-                    if not self.dshot_cfg.bidirectional:
-                        pins = self.wait([{0: 'r'}, {0: 'f'}, {'skip': self.dshot_cfg.samples_after_motorcmd}])
-                    else:
-                        pins = self.wait([{0: 'f'}, {0: 'r'}, {'skip': self.dshot_cfg.samples_after_motorcmd}])
-                    #TODO: Increase skip to maximum time for effiency
-                    #TODO: Mark any changes in this time as errors?  Option to reduce load?
+                    match self.state_dshot:
+                        case State_Dshot.RESET:
+                            dshot_value = DshotCmd(self.dshot_cfg)
+                            self.state_dshot = State_Dshot.START
 
-                    if self.currbit_ss and self.currbit_es and self.matched[2]:
-                        # Assume end of packet if have seen start and end of a potential bit but no further change within 3 periods
-                        # TODO: Confirm wait period this works with spec
+                        case State_Dshot.START:
+                            if not self.dshot_cfg.bidirectional:
+                                pins = self.wait([{0: 'r'}, {0: 'f'}, {'skip': self.dshot_cfg.samples_after_motorcmd}])
+                            else:
+                                pins = self.wait([{0: 'f'}, {0: 'r'}, {'skip': self.dshot_cfg.samples_after_motorcmd}])
+                            #TODO: Increase skip to maximum time for effiency
+                            #TODO: Mark any changes in this time as errors?  Option to reduce load?
 
-                        args = self.currbit_ss, self.currbit_es, (self.currbit_ss + self.dshot_cfg.samples_pp)
-                        results += self.complete_DshotBit(*args)
-                        self.currbit_ss = None
-                        self.currbit_es = None
-                        #print(results)
-                        # Pass results to decoder
+                            if self.currbit_ss and self.currbit_es and self.matched[2]:
+                                # Assume end of packet if have seen start and end of a potential bit but no further change within 3 periods
+                                # TODO: Confirm wait period this works with spec
 
-                        result = dshot_value.handle_bits_dshot(results)
-                        if result:
-                            self.display_dshot(dshot_value)
-                        if result and self.dshot_cfg.bidirectional:
-                            self.state = State.TELEM
+                                args = self.currbit_ss, self.currbit_es, (self.currbit_ss + self.dshot_cfg.samples_pp)
+                                curr_bit = BitDshot(*args)
+                                dshot_value.add_bit(curr_bit)
+                                self.display_bit(curr_bit,0)
+                                self.currbit_ss = None
+                                self.currbit_es = None
+                                #print(results)
+                                # Pass results to decoder
 
-                        results = []
-                        #dshot_value = DshotCmd(self.dshot_cfg)
+                                result = dshot_value.handle_bits_dshot()
+                                if result:
+                                    self.display_dshot(dshot_value)
+                                    self.state_dshot = State_Dshot.RESET
+                                if result and self.dshot_cfg.bidirectional:
+                                    self.state = State.TELEM
 
-                    if self.matched[0] and not self.currbit_ss and not self.currbit_es:
-                        # Start of bit
-                        self.currbit_ss = self.samplenum
-                    elif self.matched[1] and self.currbit_ss and not self.currbit_es:
-                        # End of bit
-                        self.currbit_es = self.samplenum
-                    elif self.matched[0] and self.currbit_es and self.currbit_ss:
-                        # Have complete bit, can handle bit now
-                        args = self.currbit_ss, self.currbit_es, self.samplenum
-                        results += self.complete_DshotBit(*args)
 
-                        self.currbit_ss = self.samplenum
-                        self.currbit_es = None
+                            if self.matched[0] and not self.currbit_ss and not self.currbit_es:
+                                # Start of bit
+                                self.currbit_ss = self.samplenum
+                            elif self.matched[1] and self.currbit_ss and not self.currbit_es:
+                                # End of bit
+                                self.currbit_es = self.samplenum
+                            elif self.matched[0] and self.currbit_es and self.currbit_ss:
+                                # Have complete bit, can handle bit now
+                                args = self.currbit_ss, self.currbit_es, self.samplenum
+                                curr_bit = BitDshot(*args)
+                                dshot_value.add_bit(curr_bit)
+                                self.display_bit(curr_bit,0)
+
+                                self.currbit_ss = self.samplenum
+                                self.currbit_es = None
                 case State.TELEM:
                     match self.state_telem:
-                        case State_Telem.RESET:
-                            telem = 0b0
-                            self.state_telem = State_Telem.START
+                        case State_Dshot.RESET:
+                            telem_value = DshotTelem(self.dshot_cfg)
+                            self.state_telem = State_Dshot.START
 
-                        case State_Telem.START:
+                        case State_Dshot.START:
                             # First wait for falling edge (idle high)
                             pins = self.wait([{0: 'f'}])
                             # Save start pulse
                             tlm_start = self.samplenum
                             # Switch to receiving state
-                            self.state_telem = State_Telem.RECV
+                            self.state_telem = State_Dshot.RECV
                             # TODO: Check if still low after 1/8 bitlength for error det?
-                        case State_Telem.RECV:
+                        case State_Dshot.RECV:
                             # First conditions skips half bit width and matches low
                             # Second condition skips half bit width and matches high
                             pins = self.wait([{0: 'l', 'skip': self.dshot_cfg.telem_baudrate_midpoint},
@@ -225,23 +237,21 @@ class Decoder(srd.Decoder):
                             # Append next bit
                             args = (self.samplenum - self.dshot_cfg.telem_baudrate_midpoint), self.samplenum, (self.samplenum + self.dshot_cfg.telem_baudrate_midpoint)
                             curr_bit = Bit_DshotTelem(*args,self.matched)
-                            self.put(curr_bit.ss,curr_bit.es,
-                                     self.out_ann,
-                                     [5, ['%04d' % curr_bit.bit_]])
-
+                            self.display_bit(curr_bit,5)
                             telem_value.add_bit(curr_bit)
 
 
                             # Skip half bitwidth to end of bit
                             pins = self.wait([{'skip': self.dshot_cfg.telem_baudrate_midpoint}])
 
-                            if telem_value.bits.bit_length() >= 20:
+                            if telem_value.bits.bit_length() >= 20-1:
                                 telem_value.process_telem()
-
+                                self.display_telem(telem_value)
                                 # Reset
-                                self.state_telem = State_Telem.RESET
+                                self.state_telem = State_Dshot.RESET
                                 # Except Dshot packet next
                                 self.state = State.CMD
+
 
                             # If not mark as error
 
