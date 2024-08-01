@@ -206,6 +206,9 @@ class Decoder(srd.Decoder):
                                     self.state_dshot = State_Dshot.RESET
                                     #TODO: Change??
                                     dshot_value.packet.es = self.samplenum
+                                else:
+                                    #error, reset
+                                    self.state_dshot = State_Dshot.RESET
                                 if result and self.dshot_cfg.bidirectional:
                                     self.state = State.TELEM
 
