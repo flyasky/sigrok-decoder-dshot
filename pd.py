@@ -23,8 +23,8 @@
 import sigrokdecode as srd
 from functools import reduce
 from enum import Enum
+#from protoDshot import DshotCmd, DshotTelem, BitDshot, DshotSettings, Bit_DshotTelem
 from dshot.protoDshot import DshotCmd, DshotTelem, BitDshot, DshotSettings, Bit_DshotTelem
-
 
 
 class SamplerateError(Exception):
@@ -42,6 +42,12 @@ class State_Dshot(Enum):
     RECV = 2
 
 
+class Ann:
+    BIT, COMMAND, THROTTLE, TELEMETRY_REQUEST, CRC, ERRORS, \
+    TELEMETRY_BIT, TELEMETRY_ERPM, TELEMETRY_EDT, TELEMETRTY_ERRORS = \
+    range(10)
+
+
 class Decoder(srd.Decoder):
     api_version = 3
     id = 'dshot'
@@ -57,36 +63,32 @@ class Decoder(srd.Decoder):
     )
 
     options = (
-        {'id': 'dshot_rate', 'desc': 'DShot Rate', 'default': '150','values': ('150', '300','600','1200')},
-        { 'id': 'bidir', 'desc': 'Bidirectional DShot','default': 'True', 'values': ('True', 'False')},
-        { 'id': 'log', 'desc': 'Write log file','default': 'no', 'values': ('yes', 'no')},
+        {'id': 'dshot_rate', 'desc': 'DShot Rate', 'default': '300','values': ('150', '300', '600', '1200')},
+        {'id': 'bidir', 'desc': 'Bidirectional DShot','default': 'True', 'values': ('True', 'False')},
+        {'id': 'log', 'desc': 'Write log file','default': 'no', 'values': ('yes', 'no')},
         {'id': 'edt_force', 'desc': 'Force EDT as telem type', 'default': 'no', 'values': ('True', 'False')},
     )
     annotations = (
         ('bit', 'Bit'),
         ('cmd', 'Command'),
         ('throttle', 'Throttle'),
+        ('telem_request', 'Telem Requets'),
         ('checksum', 'CRC'),
         ('errors', 'Errors'),
         ('telem_bit', 'Telem Bit'),
         ('telem_erpm', 'Telem ERPM'),
         ('telem_edt', 'Telem EDT'),
         ('telem_errors', 'Telem Errors'),
-        ('telem_error2', 'Telem Errors2'),
-
     )
     annotation_rows = (
-        ('bits', 'Bits', (0,)),
-        ('dshot_data', 'DShot Data', (1,2,3)),
-        ('dshot_errors', 'Dshot Errors', (4,)),
-        ('telem_bits', 'Telem Bits', (5,)),
-        ('dshot_telem_erpm', 'Dshot Telem ERPM', (6,)),
-        ('dshot_telem_edt', 'Dshot Telem', (7,)),
-        ('dshot_telem_errors', 'Dshot Errors', (8,)),
-        ('dshot_telem_errors2', 'Dshot Errors', (9,)),
+        ('bits', 'Bits', (Ann.BIT,)),
+        ('dshot_data', 'DShot Data', (Ann.COMMAND, Ann.THROTTLE, Ann.TELEMETRY_REQUEST, Ann.CRC)),
+        ('dshot_errors', 'Dshot Errors', (Ann.ERRORS,)),
+        ('telem_bits', 'Telem Bits', (Ann.TELEMETRY_BIT,)),
+        ('dshot_telem_erpm', 'Dshot Telem ERPM', (Ann.TELEMETRY_ERPM,)),
+        ('dshot_telem_edt', 'Dshot Telem', (Ann.TELEMETRY_EDT,)),
+        ('dshot_telem_errors', 'Dshot Errors', (Ann.TELEMETRTY_ERRORS,)),
     )
-
-    #dshot_period_lookup = {'150': 6.67e-6, '300': 3.33e-6,'600':1.67e-6,'1200':0.83e-6}
 
 
     def __init__(self):
@@ -123,34 +125,47 @@ class Decoder(srd.Decoder):
         self.put(bitseq.ss, bitseq.es, self.out_ann,
                  [annot, ['%d' % bool(bitseq)]])
 
-    def display_dshot(self,dshot):
+    def display_dshot(self, dshot):
         crc_startsample = dshot.results[12].ss
 
         # Split annotation based on value type
-        if dshot.dshot_value < 48:
+        if dshot.dshot_value == 0:
+            self.put(dshot.results[0].ss, dshot.results[10].es, self.out_ann,
+                     [Ann.COMMAND, ['DISARMED']])
+            if dshot.telem_request:
+                self.put(dshot.results[11].ss, dshot.results[11].es, self.out_ann,
+                        [Ann.TELEMETRY_REQUEST, ['TR']])
+        elif dshot.dshot_value < 48:
             # Command
             self.put(dshot.results[0].ss, crc_startsample, self.out_ann,
-                     [1, ['%04d' % dshot.dshot_value]])
+                     [Ann.COMMAND, ['%04d' % dshot.dshot_value]])
         else:
             # Throttle
-            self.put(dshot.results[0].ss, crc_startsample, self.out_ann,
-                     [2, ['%04d' % dshot.dshot_value]])
+            self.put(dshot.results[0].ss, dshot.results[10].es, self.out_ann,
+                     [Ann.THROTTLE, ['%04d' % dshot.dshot_value]])
+            if dshot.telem_request:
+                self.put(dshot.results[11].ss, dshot.results[11].es, self.out_ann,
+                        [Ann.TELEMETRY_REQUEST, ['TR']])
 
         self.put(crc_startsample, dshot.results[15].es, self.out_ann,
-                 [3, ['Calc CRC: ' + ('%04d' % dshot.crc_calc) + ' TXed CRC:' + ('%04d' % dshot.crc_recv)]])
+                 [Ann.CRC, ['Calc CRC: ' + ('%04d' % dshot.crc_calc) + ' TXed CRC:' + ('%04d' % dshot.crc_recv)]])
         if not dshot.crc_ok:
             self.put(crc_startsample, dshot.results[15].es, self.out_ann,
-                     [4, ['CRC INVALID']])
+                     [Ann.ERRORS, ['CRC INVALID']])
 
     def display_telem(self, telem):
         crc_startsample = telem.results[12].ss
-        self.put(crc_startsample, telem.results[15].es, self.out_ann,
-                 [3, ['Calc CRC: ' + ('%04d' % telem.crc_calc) + ' TXed CRC:' + ('%04d' % telem.crc_recv)]])
+        if telem.crc_calc and telem.crc_recv:
+            self.put(crc_startsample, telem.results[15].es, self.out_ann,
+                [Ann.CRC, ['Calc CRC: ' + ('%04d' % telem.crc_calc) + ' TXed CRC:' + ('%04d' % telem.crc_recv)]])
         if not telem.crc_ok:
             self.put(crc_startsample, telem.results[15].es, self.out_ann,
-                     [4, ['CRC INVALID']])
-
-
+                     [Ann.TELEMETRTY_ERRORS, ['CRC INVALID']])
+        self.put(telem.results[0].ss, telem.results[11].es, self.out_ann,
+                 [Ann.TELEMETRY_ERPM, [str(bin(telem.dshot_value))]])
+        if telem.edt:
+            self.put(telem.results[0].ss, telem.results[11].es, self.out_ann,
+                     [Ann.TELEMETRY_EDT, [telem.edt]])
 
 
     def decode(self):
@@ -160,9 +175,7 @@ class Decoder(srd.Decoder):
         dshot_value = DshotCmd(self.dshot_cfg)
         telem_value = DshotTelem(self.dshot_cfg)
 
-        #bitseq = BitDshot()
         while True:
-
             match self.state:
                 case State.CMD:
                     match self.state_dshot:
@@ -185,18 +198,17 @@ class Decoder(srd.Decoder):
                                 args = self.currbit_ss, self.currbit_es, (self.currbit_ss + self.dshot_cfg.samples_pp)
                                 curr_bit = BitDshot(*args)
                                 dshot_value.add_bit(curr_bit)
-                                self.display_bit(curr_bit,0)
+                                self.display_bit(curr_bit, Ann.BIT)
                                 self.currbit_ss = None
                                 self.currbit_es = None
-                                #print(results)
-                                # Pass results to decoder
 
-                                result = dshot_value.handle_bits_dshot()
-                                if result:
-                                    self.display_dshot(dshot_value)
-                                    self.state_dshot = State_Dshot.RESET
-                                if result and self.dshot_cfg.bidirectional:
-                                    self.state = State.TELEM
+                            # Pass results to decoder
+                            result = dshot_value.handle_bits_dshot()
+                            if result:
+                                self.display_dshot(dshot_value)
+                                self.state_dshot = State_Dshot.RESET
+                            if result and self.dshot_cfg.bidirectional:
+                                self.state = State.TELEM
 
 
                             if self.matched[0] and not self.currbit_ss and not self.currbit_es:
@@ -229,44 +241,29 @@ class Decoder(srd.Decoder):
                             self.state_telem = State_Dshot.RECV
                             # TODO: Check if still low after 1/8 bitlength for error det?
                         case State_Dshot.RECV:
+
                             # First conditions skips half bit width and matches low
                             # Second condition skips half bit width and matches high
                             pins = self.wait([{0: 'l', 'skip': self.dshot_cfg.telem_baudrate_midpoint},
-                                              {0: 'h', 'skip': self.dshot_cfg.telem_baudrate_midpoint}])
+                                            {0: 'h', 'skip': self.dshot_cfg.telem_baudrate_midpoint}])
 
                             # Append next bit
                             args = (self.samplenum - self.dshot_cfg.telem_baudrate_midpoint), self.samplenum, (self.samplenum + self.dshot_cfg.telem_baudrate_midpoint)
-                            curr_bit = Bit_DshotTelem(*args,self.matched)
-                            self.display_bit(curr_bit,5)
+                            curr_bit = Bit_DshotTelem(*args,
+                                            self.matched)
+                            self.display_bit(curr_bit, Ann.TELEMETRY_BIT)
                             telem_value.add_bit(curr_bit)
-
 
                             # Skip half bitwidth to end of bit
                             pins = self.wait([{'skip': self.dshot_cfg.telem_baudrate_midpoint}])
 
-                            if telem_value.bits.bit_length() >= 20-1:
-                                telem_value.process_telem()
+                            if telem_value.process_telem():
                                 self.display_telem(telem_value)
                                 # Reset
                                 self.state_telem = State_Dshot.RESET
                                 # Except Dshot packet next
                                 self.state = State.CMD
 
-
                             # If not mark as error
 
-                            # Then skip x samples and sample
-                            # Repeat for 21 bits (TBC)
-
-
-            #TODO: What happens if it gets stuck in the wrong state?
-
-
-
-
-            
-             
-
-
-
-
+    #TODO: What happens if it gets stuck in the wrong state?

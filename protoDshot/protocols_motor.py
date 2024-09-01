@@ -21,7 +21,6 @@ gcr_tables = {
 }
 
 
-
 class DshotSettings():
     def __init__(self):
         self.samplerate = 0
@@ -36,14 +35,14 @@ class DshotSettings():
         self.telem_start = None
         self.edt_force = False
         self.update()
-        return
 
     def update(self):
         self.dshot_period = 1 / self.dshot_kbaud
         self.samples_pp = int(self.samplerate * self.dshot_period)
         self.samples_after_motorcmd = self.samples_pp * 3
         self.samples_after_telempkt = self.samples_pp * 3
-        self.telem_baudrate_midpoint = int((self.samplerate / (self.dshot_kbaud * (5 / 4))) / 2.0)
+        self.telem_baudrate_midpoint = int((self.samplerate / (self.dshot_kbaud * (23 / 20))) / 2.0)
+
 
 class DshotCommon():
     def __init__(self,settings_Dshot=DshotSettings()):
@@ -62,7 +61,7 @@ class DshotCommon():
         else:
             self.crc_calc = int(((data ^ (data >> 4) ^ (data >> 8))) & 0x0F)
 
-        if not (self.crc_recv == self.crc_calc):
+        if self.crc_recv != self.crc_calc:
             self.crc_ok = False
             return False
         self.crc_ok = True
@@ -73,13 +72,13 @@ class DshotCommon():
         self.bits = self.bits << 1
         self.bits = self.bits | seq.bit_
 
+
 class DshotCmd(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
-
         self.dshot_value = None
         self.telem_request = None
-        return
+
     def handle_bits_dshot(self):
         # ss, es, bit
         if len(self.results) != 16:
@@ -101,28 +100,17 @@ class DshotCmd(DshotCommon):
 
         if not self.checkCRC(data,crc_recv):
             return False
-
-
         return True
             # TODO: Align this correctly
-
-
-class BitException(ValueError):
-    def __init__(self, arg1, arg2):
-        super().__init__(arg1)
-        print("Second argument is " + arg2)
 
 
 class DshotTelem(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
-
         self.dshot_value = None
         self.telem_request = None
         self.xor = 0b0
-        return
-
-
+        self.edt = None
 
     def bits_xor_next(self,bits):
         return bits ^ (bits >> 1)
@@ -161,32 +149,48 @@ class DshotTelem(DshotCommon):
         crc_recv = output & 0xF
         data = (output >> 4) & 0xFFF
 
-        if not self.checkCRC(data,crc_recv):
-            raise ValueError
+        self.dshot_value = data
+
+        e = data >> 8
+
+        if e % 2 == 0:
+            self.edt = 'T'
+        # if e == 0x02:
+        #     self.edt = 'Temp'
+        # elif e == 0x04:
+        #     self.edt = 'Voltage'
+        # elif e == 0x06:
+        #     self.edt = 'Current'
+        # else:
+        #     self.edt = ''
+
+        if not self.checkCRC(data, crc_recv):
+            None
+            #raise ValueError
         return True
-        # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
-        #          end, self.out_ann,
-        #          [7, ['%23s' % ("RX CRC: " + hex(crc_received) + " Calc CRC: " + hex(crc_calc))]])
-        # if crc_calc != crc_received:
-            # self.put(end - ((self.telem_baudrate_midpoint * 2) * 4),
-            #          end, self.out_ann,
-            #          [8, ['%23s' % ("CRC ERROR!")]])
+        #Todo
         # The upper 12 bit contain the eperiod (1/erps) in the following bitwise encoding:
         #
         # e e e m m m m m m m m m
         #
         # The 9 bit value M needs to shifted left E times to get the period in micro seconds.
         # This gives a range of 1 us to 65408 us. Which translates to a min e-frequency of 15.29 hz or for 14 pole motors 3.82 hz.
-        return
+
 
     def process_telem_edt(self):
-
         return
 
     def process_telem(self):
+        if len(self.results) != 21:
+            return False
         if self.cfg.edt_force:
             self.process_telem_edt()
         else:
             self.process_telem_erpm()
+        return True
 
-        return
+
+class BitException(ValueError):
+    def __init__(self, arg1, arg2):
+        super().__init__(arg1)
+        print("Second argument is " + arg2)
