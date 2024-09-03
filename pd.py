@@ -23,7 +23,6 @@
 import sigrokdecode as srd
 from functools import reduce
 from enum import Enum
-#from protoDshot import DshotCmd, DshotTelem, BitDshot, DshotSettings, Bit_DshotTelem
 from dshot.protoDshot import DshotCmd, DshotTelem, BitDshot, DshotSettings, Bit_DshotTelem
 
 
@@ -44,8 +43,8 @@ class State_Dshot(Enum):
 
 class Ann:
     BIT, COMMAND, THROTTLE, TELEMETRY_REQUEST, CRC, ERRORS, \
-    TELEMETRY_BIT, TELEMETRY_ERPM, TELEMETRY_EDT, TELEMETRTY_ERRORS = \
-    range(10)
+    TELEMETRY_BIT, TELEMETRY_GCR, TELEMETRY_PACKET, TELEMETRY_CRC, TELEMETRY_ERPM, TELEMETRY_EDT, TELEMETRTY_ERRORS = \
+    range(13)
 
 
 class Decoder(srd.Decoder):
@@ -76,6 +75,9 @@ class Decoder(srd.Decoder):
         ('checksum', 'CRC'),
         ('errors', 'Errors'),
         ('telem_bit', 'Telem Bit'),
+        ('telem_gcr', 'Telem GCR'),
+        ('telem_packet', 'Telem Packet'),
+        ('telem_crc', 'Telem CRC'),
         ('telem_erpm', 'Telem ERPM'),
         ('telem_edt', 'Telem EDT'),
         ('telem_errors', 'Telem Errors'),
@@ -85,6 +87,8 @@ class Decoder(srd.Decoder):
         ('dshot_data', 'DShot Data', (Ann.COMMAND, Ann.THROTTLE, Ann.TELEMETRY_REQUEST, Ann.CRC)),
         ('dshot_errors', 'Dshot Errors', (Ann.ERRORS,)),
         ('telem_bits', 'Telem Bits', (Ann.TELEMETRY_BIT,)),
+        ('dshot_telem_gcr', 'Dshot Telem GCR', (Ann.TELEMETRY_GCR,)),
+        ('dshot_telem_packet', 'Dshot Telem Packet', (Ann.TELEMETRY_PACKET, Ann.TELEMETRY_CRC,)),
         ('dshot_telem_erpm', 'Dshot Telem ERPM', (Ann.TELEMETRY_ERPM,)),
         ('dshot_telem_edt', 'Dshot Telem', (Ann.TELEMETRY_EDT,)),
         ('dshot_telem_errors', 'Dshot Errors', (Ann.TELEMETRTY_ERRORS,)),
@@ -155,18 +159,37 @@ class Decoder(srd.Decoder):
 
     def display_telem(self, telem):
         crc_startsample = telem.results[12].ss
-        if telem.crc_calc and telem.crc_recv:
-            self.put(crc_startsample, telem.results[15].es, self.out_ann,
-                [Ann.CRC, ['Calc CRC: ' + ('%04d' % telem.crc_calc) + ' TXed CRC:' + ('%04d' % telem.crc_recv)]])
-        if not telem.crc_ok:
-            self.put(crc_startsample, telem.results[15].es, self.out_ann,
-                     [Ann.TELEMETRTY_ERRORS, ['CRC INVALID']])
-        self.put(telem.results[0].ss, telem.results[11].es, self.out_ann,
-                 [Ann.TELEMETRY_ERPM, [str(bin(telem.dshot_value))]])
+        if telem.gcr_recv:
+            self.put(telem.results[0].ss, telem.results[20].es, self.out_ann,
+                     [Ann.TELEMETRY_GCR, [self.bin_quibble(telem.gcr_recv)]])
+
+        if not telem.crc_ok or len(telem.results) != 21 or (telem.crc_recv != telem.crc_calc) or (telem.crc_calc == 0):
+            self.put(crc_startsample, telem.results[20].es, self.out_ann,
+                     [Ann.TELEMETRTY_ERRORS, ['CRC INVALID or smth else']])
+
+        if telem.packet:
+            self.put(telem.results[0].ss, telem.results[15].es, self.out_ann,
+                     [Ann.TELEMETRY_PACKET, [self.bin_nibble(telem.packet)]])
+        #if telem.crc_calc and telem.crc_recv:
+            self.put(telem.results[16].ss, telem.results[20].es, self.out_ann,
+                [Ann.TELEMETRY_CRC, ['Calc CRC: ' + ('%04d' % telem.crc_calc) + ' TXed CRC:' + ('%04d' % telem.crc_recv)]])
+
+        # self.put(telem.results[0].ss, telem.results[11].es, self.out_ann,
+        #          [Ann.TELEMETRY_ERPM, [str(bin(telem.dshot_value))]])
         if telem.edt:
             self.put(telem.results[0].ss, telem.results[11].es, self.out_ann,
                      [Ann.TELEMETRY_EDT, [telem.edt]])
 
+
+    def bin_nibble(self, val):
+        b = bin(val)[2:]
+        new_b = '_'.join([b[::-1][i:i+4][::-1] for i in range(0, len(b), 4)][::-1])
+        return ''.join(['0']*(4 - len(b) % 4 if len(b) % 4 != 0 else 0) + [new_b])
+
+    def bin_quibble(self, val):
+        b = bin(val)[2:]
+        new_b = '_'.join([b[::-1][i:i+5][::-1] for i in range(0, len(b), 5)][::-1])
+        return ''.join(['0']*(5 - len(b) % 5 if len(b) % 5 != 0 else 0) + [new_b])
 
     def decode(self):
         if not self.samplerate:

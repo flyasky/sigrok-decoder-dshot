@@ -107,6 +107,8 @@ class DshotCmd(DshotCommon):
 class DshotTelem(DshotCommon):
     def __init__(self,*args):
         super().__init__(*args)
+        self.gcr_recv = None
+        self.packet = None
         self.dshot_value = None
         self.telem_request = None
         self.xor = 0b0
@@ -123,12 +125,9 @@ class DshotTelem(DshotCommon):
 
     def process_telem_erpm(self):
         # Raw packet
-        #self.put(start, end, self.out_ann, [6, ['%23s' % bin(packet)]])
-        # XOR with next?
-        bits = self.bits
+        bits = self.bits_xor_next(self.bits)
         bits &= 0x0FFFFF
-        bits = self.bits_xor_next(bits)
-        #self.put(start,end, self.out_ann, [7, ['%23s' % bin(packet)]])
+        self.gcr_recv = bits
         # Undo GCR
         output = 0b0
 
@@ -145,6 +144,8 @@ class DshotTelem(DshotCommon):
             except:
                 raise BitException(bin(key),bin(gcr_n))
 
+        # UnGCR value
+        self.packet = output
         # Compare CRC
         crc_recv = output & 0xF
         data = (output >> 4) & 0xFFF
